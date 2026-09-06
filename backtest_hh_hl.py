@@ -3,7 +3,8 @@
 HH-HL Breakout Strategy Backtester
 Replicates the Pine Script logic from HH-HL-strategy.pine on CSV OHLC data.
 
-Usage: python3 backtest_hh_hl.py NSE_DLY_SBIN_1W.csv [--length 5] [--sl-buffer 1.0] [--output trades.csv] [--report report.txt]
+Usage: python3 backtest_hh_hl.py NSE_DLY_SBIN_1W.csv \
+[--length 5] [--sl-buffer 1.0] [--output trades.csv] [--report report.txt]
 """
 
 import csv
@@ -45,10 +46,10 @@ def run_backtest(rows, length=21, sl_buffer=1.0):
     Each row: {'time': str, 'open': float, 'high': float, 'low': float, 'close': float}
     Returns: (trades_list, swings_list)
     """
-    dates  = [r['time']  for r in rows]
-    opens  = [r['open']  for r in rows]
-    highs  = [r['high']  for r in rows]
-    lows   = [r['low']   for r in rows]
+    dates = [r['time'] for r in rows]
+    opens = [r['open'] for r in rows]
+    highs = [r['high'] for r in rows]
+    lows = [r['low'] for r in rows]
     closes = [r['close'] for r in rows]
     n = len(rows)
 
@@ -108,11 +109,11 @@ def run_backtest(rows, length=21, sl_buffer=1.0):
                 breakout_close = c
                 breakout_bar = i
                 state = 2
-            if c < trade_hl:
+            elif c < trade_hl:
                 state = 0
 
         # State 2: entry pending — must be a subsequent bar
-        if state == 2 and breakout_bar is not None and i > breakout_bar and cur is None:
+        elif state == 2 and breakout_bar is not None and i > breakout_bar and cur is None:
             if h > breakout_close:
                 entry_price = max(o, breakout_close)  # gap-up → fill at open
                 target_price = breakout_close + (breakout_close - trade_hl)
@@ -125,24 +126,24 @@ def run_backtest(rows, length=21, sl_buffer=1.0):
                 state = 0
 
         # State 3: manage position — check TP/SL on bars AFTER entry
-        if state == 3 and cur is not None and i > cur['entry_bar']:
-            hit_sl = l <= stop_price
-            hit_tp = h >= target_price
+        elif state == 3 and cur is not None and i > cur['entry_bar']:
+            hit_sl = l <= cur['stop_loss']
+            hit_tp = h >= cur['target']
 
             if hit_sl or hit_tp:
                 if hit_sl and hit_tp:
                     # Ambiguous bar: closer to open wins
-                    reason = 'SL' if abs(o - stop_price) <= abs(o - target_price) else 'TP'
+                    reason = 'SL' if abs(o - cur['stop_loss']) <= abs(o - cur['target']) else 'TP'
                 elif hit_sl:
                     reason = 'SL'
                 else:
                     reason = 'TP'
 
-                exit_price = stop_price if reason == 'SL' else target_price
+                exit_price = cur['stop_loss'] if reason == 'SL' else cur['target']
                 # Account for gap: if open already past the level
-                if reason == 'SL' and o < stop_price:
+                if reason == 'SL' and o < cur['stop_loss']:
                     exit_price = o
-                if reason == 'TP' and o > target_price:
+                if reason == 'TP' and o > cur['target']:
                     exit_price = o
 
                 pnl = exit_price - cur['entry_price']
@@ -201,7 +202,7 @@ def build_report(trades, swings, length, sl_buffer):
     w(sep)
 
     total = len(trades)
-    wins  = [t for t in trades if t['pnl'] > 0]
+    wins = [t for t in trades if t['pnl'] > 0]
     losses = [t for t in trades if t['pnl'] <= 0]
     tp_ct = sum(1 for t in trades if t['reason'] == 'TP')
     sl_ct = sum(1 for t in trades if t['reason'] == 'SL')
@@ -212,8 +213,8 @@ def build_report(trades, swings, length, sl_buffer):
     w(f"  Win rate     : {len(wins)/total*100:.1f}%  ({len(wins)}W / {len(losses)}L)")
     w(f"  Total P&L    : {total_pnl:+.2f}")
     w(f"  Avg P&L      : {total_pnl/total:+.2f}  "
-      f"(avg win: {sum(t['pnl'] for t in wins)/max(len(wins),1):+.2f}  "
-      f"avg loss: {sum(t['pnl'] for t in losses)/max(len(losses),1):+.2f})")
+      f"(avg win: {sum(t['pnl'] for t in wins)/max(len(wins), 1):+.2f}  "
+      f"avg loss: {sum(t['pnl'] for t in losses)/max(len(losses), 1):+.2f})")
     w(f"  Best trade   : {max(t['pnl'] for t in trades):+.2f}")
     w(f"  Worst trade  : {min(t['pnl'] for t in trades):+.2f}")
     w(f"  Avg bars held: {sum(t['bars'] for t in trades)/total:.1f}")
