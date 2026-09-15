@@ -77,35 +77,44 @@ def run_backtest(rows, length=21, sl_buffer=1.0):
         ph, pl = pivot_highs[i], pivot_lows[i]
         o, h, l, c, dt = opens[i], highs[i], lows[i], closes[i], dates[i]
 
+        # Calculate the actual historical index and date of the pivot
+        pivot_idx = i - length if i >= length else i
+        pivot_dt = dates[pivot_idx]
+
         # ── Swing classification ──────────────────────────────────────────
-        new_hh = False
+        new_high_pivot = False
         if ph is not None:
+            new_high_pivot = True
+            last_hh = ph  # Update reference to the latest high unconditionally
             if prev_sh is not None and ph > prev_sh:
-                new_hh = True
-                last_hh = ph
-                swings.append((i, dt, 'HH', ph))
+                swings.append((pivot_idx, pivot_dt, 'HH', ph))
             else:
-                swings.append((i, dt, 'LH' if prev_sh else 'SH', ph))
+                swings.append((pivot_idx, pivot_dt, 'LH' if prev_sh else 'SH', ph))
             prev_sh = ph
 
         if pl is not None:
+            last_hl = pl  # Update reference to the latest low unconditionally
             if prev_sl is not None and pl > prev_sl:
-                last_hl = pl
-                swings.append((i, dt, 'HL', pl))
+                swings.append((pivot_idx, pivot_dt, 'HL', pl))
             else:
-                swings.append((i, dt, 'LL' if prev_sl else 'SL', pl))
+                swings.append((pivot_idx, pivot_dt, 'LL' if prev_sl else 'SL', pl))
             prev_sl = pl
 
         # ── State transitions (same order as Pine Script) ─────────────────
 
-        # New HH → activate setup
-        if new_hh and last_hl is not None and state < 2:
+        # New Swing High → activate setup
+        if new_high_pivot and last_hl is not None and state < 2:
             state = 1
             trade_hl = last_hl
+            trade_hh = last_hh  # Lock in the breakout level
 
-        # State 1: wait for close above HH
-        if state == 1 and last_hh is not None:
-            if c > last_hh:
+        # FIX: Update the reference low if a new low is confirmed while waiting
+        if state in [1, 2] and pl is not None:
+            trade_hl = pl
+
+        # State 1: wait for close above the locked Swing High
+        if state == 1 and trade_hh is not None:
+            if c > trade_hh:
                 breakout_close = c
                 breakout_bar = i
                 state = 2
@@ -116,11 +125,15 @@ def run_backtest(rows, length=21, sl_buffer=1.0):
         elif state == 2 and breakout_bar is not None and i > breakout_bar and cur is None:
             if h > breakout_close:
                 entry_price = max(o, breakout_close)  # gap-up → fill at open
-                target_price = breakout_close + (breakout_close - trade_hl)
+                
+                # Calculate distance using breakout close, project from entry
+                distance = breakout_close - trade_hl 
+                target_price = entry_price + distance
+                
                 stop_price = trade_hl - sl_buffer
                 cur = dict(entry_date=dt, entry_bar=i, entry_price=entry_price,
                            target=target_price, stop_loss=stop_price,
-                           hh=last_hh, hl=trade_hl, bkout=breakout_close)
+                           hh=trade_hh, hl=trade_hl, bkout=breakout_close)
                 state = 3
             elif c < trade_hl:
                 state = 0
@@ -228,6 +241,23 @@ def build_report(trades, swings, length, sl_buffer):
     w('')
     return lines
 
+def export_simplified_results(trades, filepath, stock_symbol):
+    """Write trades to a separate CSV in the simplified format."""
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Stock', 'Stop%', 'Buy Date', 'Sell Date', 'Entry Price', 'Sell Price'])
+        for t in trades:
+            # Calculate Stop Loss percentage
+            stop_pct = ((t['entry_price'] - t['stop_loss']) / t['entry_price']) * 100
+            
+            writer.writerow([
+                stock_symbol,
+                f"{stop_pct:.2f}%",
+                t['entry_date'],
+                t['exit_date'],
+                f"{t['entry_price']:.4f}",
+                f"{t['exit_price']:.4f}"
+            ])
 
 def export_trades_csv(trades, swings, path):
     """Write trades and swings to CSV files for validation."""
@@ -279,7 +309,7 @@ def read_csv(path):
 def main():
     parser = argparse.ArgumentParser(description='HH-HL Breakout Strategy Backtester')
     parser.add_argument('csv_file', help='Path to OHLC CSV file')
-    parser.add_argument('--length', type=int, default=21, help='Pivot lookback (default: 21)')
+    parser.add_argument('--length', type=int, default=5, help='Pivot lookback (default: 21)')
     parser.add_argument('--sl-buffer', type=float, default=1.0, help='SL buffer in points (default: 1.0)')
     parser.add_argument('--output', '-o', help='Export trades to CSV file')
     parser.add_argument('--report', '-r', help='Save text report to file')
@@ -312,6 +342,15 @@ def main():
         swing_path = export_trades_csv(trades, swings, args.output)
         print(f"  Trades saved to {args.output}")
         print(f"  Swings saved to {swing_path}")
+        
+        # --- NEW CODE: Export simplified summary ---
+        # Extract symbol from filename (e.g., NSE_DLY_SBIN_1W -> SBIN)
+        parts = csv_path.stem.split('_')
+        stock_symbol = parts[2] if len(parts) > 2 else csv_path.stem
+        
+        summary_path = Path(args.output).parent / f"simplified_{Path(args.output).name}"
+        export_simplified_results(trades, summary_path, stock_symbol)
+        print(f"  Simplified results saved to {summary_path}")
 
     return 0
 
