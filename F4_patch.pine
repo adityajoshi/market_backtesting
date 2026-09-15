@@ -1,0 +1,69 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © adityajoshi
+
+//@version=6
+indicator("F4 Patch", overlay=true)
+
+use_chart_tf = input.bool(true, title="Include Chart Timeframe", display=display.none)
+
+tf1_enabled = input.bool(true, title="Enable Timeframe 1", inline="tf1")
+tf1_raw     = input.timeframe("M", title="", inline="tf1")
+
+tf2_enabled = input.bool(true, title="Enable Timeframe 2", inline="tf2")
+tf2_raw     = input.timeframe("W", title="", inline="tf2")
+
+use_maestro    = input.bool(false, title="Include Maestro Symbol")
+maestro_symbol = input.string("NSE:NIFTY", title="Maestro Symbol")
+
+line1 = 13
+line2 = 21
+line3 = 50
+line4 = 200
+
+f_ema(sym, tf, len) =>
+    request.security(sym, tf, ta.ema(close, len), ignore_invalid_symbol=true)
+
+f_bullish(e5, e13, e21, e50) =>
+    not na(e5) and e5 > e13 and e13 > e21 and e21 > e50
+
+f_bearish(e5, e13, e21, e50) =>
+    not na(e5) and e5 < e13 and e13 < e21 and e21 < e50
+
+// Main symbol
+bullish_tf1 = f_bullish(f_ema(syminfo.tickerid, tf1_raw, line1), f_ema(syminfo.tickerid, tf1_raw, line2), f_ema(syminfo.tickerid, tf1_raw, line3), f_ema(syminfo.tickerid, tf1_raw, line4))
+bearish_tf1 = f_bearish(f_ema(syminfo.tickerid, tf1_raw, line1), f_ema(syminfo.tickerid, tf1_raw, line2), f_ema(syminfo.tickerid, tf1_raw, line3), f_ema(syminfo.tickerid, tf1_raw, line4))
+
+bullish_tf2 = f_bullish(f_ema(syminfo.tickerid, tf2_raw, line1), f_ema(syminfo.tickerid, tf2_raw, line2), f_ema(syminfo.tickerid, tf2_raw, line3), f_ema(syminfo.tickerid, tf2_raw, line4))
+bearish_tf2 = f_bearish(f_ema(syminfo.tickerid, tf2_raw, line1), f_ema(syminfo.tickerid, tf2_raw, line2), f_ema(syminfo.tickerid, tf2_raw, line3), f_ema(syminfo.tickerid, tf2_raw, line4))
+
+bullish_chart = f_bullish(ta.ema(close, line1), ta.ema(close, line2), ta.ema(close, line3), ta.ema(close, line4))
+bearish_chart = f_bearish(ta.ema(close, line1), ta.ema(close, line2), ta.ema(close, line3), ta.ema(close, line4))
+
+// Maestro validity check
+maestro_valid = use_maestro and not na(request.security(maestro_symbol, timeframe.period, close, ignore_invalid_symbol=true))
+
+bullish_maestro_tf1 = f_bullish(f_ema(maestro_symbol, tf1_raw, line1), f_ema(maestro_symbol, tf1_raw, line2), f_ema(maestro_symbol, tf1_raw, line3), f_ema(maestro_symbol, tf1_raw, line4))
+bearish_maestro_tf1 = f_bearish(f_ema(maestro_symbol, tf1_raw, line1), f_ema(maestro_symbol, tf1_raw, line2), f_ema(maestro_symbol, tf1_raw, line3), f_ema(maestro_symbol, tf1_raw, line4))
+
+bullish_maestro_tf2 = f_bullish(f_ema(maestro_symbol, tf2_raw, line1), f_ema(maestro_symbol, tf2_raw, line2), f_ema(maestro_symbol, tf2_raw, line3), f_ema(maestro_symbol, tf2_raw, line4))
+bearish_maestro_tf2 = f_bearish(f_ema(maestro_symbol, tf2_raw, line1), f_ema(maestro_symbol, tf2_raw, line2), f_ema(maestro_symbol, tf2_raw, line3), f_ema(maestro_symbol, tf2_raw, line4))
+
+any_active = tf1_enabled or tf2_enabled or use_chart_tf or maestro_valid
+
+bullishCondition = any_active and
+     (not tf1_enabled    or bullish_tf1)         and
+     (not tf2_enabled    or bullish_tf2)         and
+     (not use_chart_tf   or bullish_chart)       and
+     (not maestro_valid  or (bullish_maestro_tf1 and bullish_maestro_tf2))
+
+bearishCondition = any_active and
+     (not tf1_enabled    or bearish_tf1)         and
+     (not tf2_enabled    or bearish_tf2)         and
+     (not use_chart_tf   or bearish_chart)       and
+     (not maestro_valid  or (bearish_maestro_tf1 and bearish_maestro_tf2))
+
+bullishColor = color.new(color.green, 80)
+bearishColor = color.new(color.red,   90)
+
+bgPlotColor = bullishCondition ? bullishColor : bearishCondition ? bearishColor : na
+bgcolor(bgPlotColor, title="Trend Highlight")
