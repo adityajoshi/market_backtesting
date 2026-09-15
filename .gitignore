@@ -9,3 +9,5 @@ pip-log.txt
 pip-delete-this-directory.txt
 flask.log
 database.db
+*.csv
+*.txt
